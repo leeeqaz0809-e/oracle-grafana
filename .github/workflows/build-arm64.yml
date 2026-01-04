@@ -1,6 +1,5 @@
 name: Build ARM64 Plugin
 
-# 触发条件：手动触发 (方便测试) 或 推送到 main 分支时
 on:
   workflow_dispatch:
   push:
@@ -11,59 +10,48 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      # 1. 拉取代码
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2. 设置 Node.js 环境 (用于编译前端)
       - name: Setup Node.js environment
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'yarn'
 
-      # 3. 设置 Go 环境 (用于编译后端)
       - name: Setup Go environment
         uses: actions/setup-go@v5
         with:
-          go-version: '1.21' # 根据项目 go.mod 实际情况，1.21 通常兼容性较好
+          go-version: '1.21'
 
-      # 4. 安装 Mage (Grafana 插件的标准构建工具)
       - name: Install Mage
         run: |
           git clone https://github.com/magefile/mage
           cd mage
           go run bootstrap.go
 
-      # 5. 安装前端依赖
+      # --- 修改开始 ---
       - name: Install Frontend Dependencies
-        run: yarn install --frozen-lockfile
+        run: |
+          # 移除导致 Corepack 报错的字段
+          sed -i '/"packageManager":/d' package.json
+          # 安装依赖，忽略 lockfile 变动
+          yarn install --no-immutable
 
-      # 6. 编译前端代码
       - name: Build Frontend
         run: yarn build
+      # --- 修改结束 ---
 
-      # 7. 编译后端代码 (ARM64 关键步骤)
-      # Grafana SDK 的 Magefile 通常支持 build:linux-arm64
-      # 如果 Mage 失败，这里提供了一个 fallback 的手动 go build 命令
       - name: Build Backend for ARM64
         run: |
           echo "Attempting to build using Mage..."
-          # 尝试使用 mage 构建 linux/arm64
           if mage -v build:linux-arm64; then
             echo "Mage build success!"
           else
-            echo "Mage target failed or not found, falling back to manual Go build..."
-            # 获取插件 ID (通常在 plugin.json 中)
+            echo "Mage target failed, falling back to manual Go build..."
             PLUGIN_ID=$(grep '"id"' src/plugin.json | cut -d '"' -f 4)
-            echo "Detected Plugin ID: $PLUGIN_ID"
-            
-            # 手动交叉编译
-            # 注意：gpx_ 前缀是 Grafana 识别二进制文件的标准
             GOOS=linux GOARCH=arm64 go build -o ./dist/gpx_${PLUGIN_ID}_linux_arm64 ./pkg
           fi
 
-      # 8. 验证构建结果
       - name: Check Build Artifacts
         run: |
           ls -l dist/
@@ -72,13 +60,11 @@ jobs:
             exit 1
           fi
 
-      # 9. 重新打包 (因为这是一个未签名的插件，我们需要手动打包 dist 目录)
       - name: Package Plugin
         run: |
           mv dist albertowd-oraclegrafana-datasource
           tar -czvf oracle-grafana-arm64.tar.gz albertowd-oraclegrafana-datasource
 
-      # 10. 上传构建产物
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
