@@ -13,12 +13,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # --- 核心修改点：将 Node 版本从 20 改为 16 ---
+      # 1. 使用 Node 20 (配合下方的 swc 修复，Node 20 是没问题的)
       - name: Setup Node.js environment
         uses: actions/setup-node@v4
         with:
-          node-version: '16' 
-      # ----------------------------------------
+          node-version: '20'
 
       - name: Setup Go environment
         uses: actions/setup-go@v5
@@ -31,19 +30,30 @@ jobs:
           cd mage
           go run bootstrap.go
 
-      - name: Install Frontend Dependencies
+      # 2. 关键修复步骤
+      - name: Fix Dependencies (SWC Bug & Corepack)
         run: |
-          echo "正在移除 package.json 中错误的 packageManager 字段..."
+          echo "正在修复 package.json..."
+          
+          # A. 移除导致 Corepack 报错的 packageManager 字段
           sed -i '/"packageManager":/d' package.json
           
-          echo "正在安装依赖..."
-          # 使用 --ignore-engines 忽略 Node 版本过旧的警告
-          # 使用 --network-timeout 防止网络超时
-          yarn install --no-immutable --ignore-engines --network-timeout 100000
+          # B. 强制锁定 @swc/core 版本为 1.3.75 (修复 base_dir panic 报错)
+          # 使用 jq 在 package.json 中插入 resolutions 字段
+          jq '.resolutions["@swc/core"] = "1.3.75"' package.json > package.json.tmp && mv package.json.tmp package.json
+          
+          echo "修正后的 package.json 内容检查 (Resolutions):"
+          grep -A 3 "resolutions" package.json || echo "No resolutions found"
 
-      # 增加 NODE_OPTIONS 环境变量，以防 Node 16 遇到内存溢出或 OpenSSL 问题
+      # 3. 安装依赖
+      - name: Install Frontend Dependencies
+        run: |
+          # 使用 --force 确保 resolutions 生效
+          yarn install --no-immutable --force
+
       - name: Build Frontend
         env:
+           # 增加内存限制以防万一
            NODE_OPTIONS: "--max_old_space_size=4096"
         run: yarn build
 
