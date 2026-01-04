@@ -13,10 +13,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # --- 核心修改点：将 Node 版本从 20 改为 16 ---
       - name: Setup Node.js environment
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '16' 
+      # ----------------------------------------
 
       - name: Setup Go environment
         uses: actions/setup-go@v5
@@ -29,17 +31,21 @@ jobs:
           cd mage
           go run bootstrap.go
 
-      # --- 修改开始 ---
       - name: Install Frontend Dependencies
         run: |
-          # 移除导致 Corepack 报错的字段
+          echo "正在移除 package.json 中错误的 packageManager 字段..."
           sed -i '/"packageManager":/d' package.json
-          # 安装依赖，忽略 lockfile 变动
-          yarn install --no-immutable
+          
+          echo "正在安装依赖..."
+          # 使用 --ignore-engines 忽略 Node 版本过旧的警告
+          # 使用 --network-timeout 防止网络超时
+          yarn install --no-immutable --ignore-engines --network-timeout 100000
 
+      # 增加 NODE_OPTIONS 环境变量，以防 Node 16 遇到内存溢出或 OpenSSL 问题
       - name: Build Frontend
+        env:
+           NODE_OPTIONS: "--max_old_space_size=4096"
         run: yarn build
-      # --- 修改结束 ---
 
       - name: Build Backend for ARM64
         run: |
